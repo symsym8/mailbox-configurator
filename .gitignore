@@ -1,0 +1,21 @@
+# Dépendances
+node_modules/
+
+# Build
+dist/
+
+# Environnement
+.env
+.env.local
+.env.*.local
+
+# Logs
+npm-debug.log*
+
+# Éditeurs
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
