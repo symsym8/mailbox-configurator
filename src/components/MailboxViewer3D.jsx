@@ -33,6 +33,24 @@ function getTargetColor(orig, coffre, cadre, portillon) {
   return null;
 }
 
+// Couleurs trop sombres : ne pas assombrir davantage
+const NO_DARKEN = new Set([
+  "#1a2b6d", // RAL 5002
+  "#1f3a2d", // RAL 6005
+  "#383e42", // RAL 7016
+  "#474a50", // RAL 7024
+  "#1f1f1f", // RAL 9011
+  "#442f29", // RAL 8017
+  "#6c3b2a", // RAL 8012
+]);
+
+function applyDarken(hex) {
+  if (NO_DARKEN.has(hex.toLowerCase())) return hex;
+  const c = new THREE.Color(hex);
+  c.multiplyScalar(0.75);
+  return c;
+}
+
 function makeMaterial(color, isMetal) {
   return new THREE.MeshStandardMaterial({
     color,
@@ -108,7 +126,7 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
         couleurPortillon,
       );
       if (target !== null) {
-        obj.material.color.set(target);
+        obj.material.color.set(applyDarken(target));
       } else {
         obj.material.color.copy(orig);
       }
