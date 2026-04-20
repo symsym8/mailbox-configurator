@@ -3,6 +3,8 @@ import { Canvas, useThree } from "@react-three/fiber";
 import { useGLTF, OrbitControls, Environment } from "@react-three/drei";
 import * as THREE from "three";
 
+THREE.ColorManagement.enabled = true;
+
 // Couleurs marqueurs confirmées dans la console GLB
 const MARKER_RED = new THREE.Color(1, 0, 0);
 const MARKER_CYAN = new THREE.Color(0, 1, 1);
@@ -31,15 +33,12 @@ function getTargetColor(orig, coffre, cadre, portillon) {
   return null;
 }
 
-// Crée un MeshPhysicalMaterial réaliste en fonction du type de surface
 function makeMaterial(color, isMetal) {
-  return new THREE.MeshPhysicalMaterial({
+  return new THREE.MeshStandardMaterial({
     color,
-    roughness: isMetal ? 0.15 : 0.35,
-    metalness: isMetal ? 0.85 : 0.05,
-    clearcoat: isMetal ? 0.0 : 0.5, // vernis peinture époxy
-    clearcoatRoughness: 0.2,
-    envMapIntensity: 1.2,
+    roughness: isMetal ? 0.2 : 0.55,
+    metalness: isMetal ? 0.8 : 0.0,
+    envMapIntensity: isMetal ? 1.0 : 0.6,
   });
 }
 
@@ -143,20 +142,22 @@ export default function MailboxViewer3D({
         shadows
         camera={{ position: [0, 2, 8], fov: 50 }}
         style={{ width: "100%", height: "100%" }}
-        gl={{ antialias: true }}
+        gl={{
+          antialias: true,
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 0.9,
+          outputColorSpace: THREE.SRGBColorSpace,
+        }}
         dpr={[1, 2]}
       >
-        {/* Fond neutre clair */}
         <color attach="background" args={["#f0f2f6"]} />
 
-        {/* Éclairage IBL studio pour reflets réalistes */}
-        <Environment preset="studio" />
+        <Environment preset="studio" backgroundIntensity={0} />
 
-        {/* Lumières directionnelles avec ombres */}
-        <ambientLight intensity={0.4} />
+        <ambientLight intensity={0.5} />
         <directionalLight
           position={[6, 10, 6]}
-          intensity={1.2}
+          intensity={1.8}
           castShadow
           shadow-mapSize={[2048, 2048]}
           shadow-camera-near={0.1}
@@ -166,7 +167,7 @@ export default function MailboxViewer3D({
           shadow-camera-top={10}
           shadow-camera-bottom={-10}
         />
-        <directionalLight position={[-4, 4, -4]} intensity={0.4} />
+        <directionalLight position={[-4, 4, -4]} intensity={0.5} />
 
         <Suspense fallback={null}>
           <MailboxModel
