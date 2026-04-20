@@ -1,10 +1,7 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import './index.css'
-import App from './App.jsx'
+import { createRoot } from "react-dom/client";
+import "./index.css";
+import App from "./App.jsx";
 
-createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-)
+// StrictMode retiré : il double-monte les composants en dev,
+// ce qui crée deux contextes WebGL et déclenche "Context Lost" sur le Canvas Three.js.
+createRoot(document.getElementById("root")).render(<App />);

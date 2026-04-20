@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import MailboxSVGViewer from "./components/MailboxSVGViewer";
+import MailboxViewer3D from "./components/MailboxViewer3D";
 import { RAL_COLORS } from "./utils/colors";
 import { generatePDF } from "./utils/pdfGenerator";
 
@@ -164,6 +165,7 @@ export default function App() {
   const [exporting, setExporting] = useState(false);
   const [svgVisible, setSvgVisible] = useState(true);
   const [descOpen, setDescOpen] = useState(false);
+  const [view3D, setView3D] = useState(false);
   const previewRef = useRef(null);
 
   const setC = useCallback((k, v) => setConfig((p) => ({ ...p, [k]: v })), []);
@@ -550,6 +552,7 @@ export default function App() {
                     "radial-gradient(circle, rgba(201,168,76,0.06) 0%, transparent 70%)",
                 }}
               />
+              {/* Badge gamme/modèle — coin haut droit */}
               <div
                 style={{
                   position: "absolute",
@@ -574,28 +577,75 @@ export default function App() {
                 <span style={{ color: T.dim }}>·</span>
                 <span style={{ color: T.muted }}>Modèle {config.modele}</span>
               </div>
-              <div
+
+              {/* Bouton toggle Vue 2D / Vue 3D — coin haut gauche */}
+              <button
+                onClick={() => setView3D((v) => !v)}
                 style={{
-                  position: "relative",
-                  zIndex: 1,
-                  width: "100%",
-                  height: "100%",
+                  position: "absolute",
+                  top: 14,
+                  left: 16,
+                  padding: "5px 13px",
+                  borderRadius: 20,
+                  background: view3D ? T.gold : T.surface,
+                  border: `1px solid ${view3D ? T.goldD : T.border}`,
+                  boxShadow: "0 1px 4px rgba(0,0,0,0.08)",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  color: view3D ? "#fff" : T.muted,
+                  cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  opacity: svgVisible ? 1 : 0,
-                  transition: "opacity 0.2s ease",
+                  gap: 6,
+                  zIndex: 2,
+                  transition: "all 0.2s ease",
+                  fontFamily: "inherit",
                 }}
               >
-                <MailboxSVGViewer
-                  key={svgKey}
-                  gamme={config.gamme}
-                  modele={config.modele}
-                  couleurCoffre={config.couleurCoffre}
-                  couleurCadre={config.couleurCadre}
-                  couleurPortillon={config.couleurPortillon}
-                />
-              </div>
+                <span style={{ fontSize: 13 }}>{view3D ? "⬛" : "🔲"}</span>
+                {view3D ? "Vue 2D" : "Vue 3D"}
+              </button>
+
+              {/* Contenu : SVG ou viewer 3D */}
+              {view3D ? (
+                <div
+                  style={{
+                    position: "absolute",
+                    inset: 0,
+                    zIndex: 1,
+                  }}
+                >
+                  <MailboxViewer3D
+                    couleurCoffre={config.couleurCoffre}
+                    couleurCadre={config.couleurCadre}
+                    couleurPortillon={config.couleurPortillon}
+                  />
+                </div>
+              ) : (
+                <div
+                  style={{
+                    position: "relative",
+                    zIndex: 1,
+                    width: "100%",
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    opacity: svgVisible ? 1 : 0,
+                    transition: "opacity 0.2s ease",
+                  }}
+                >
+                  <MailboxSVGViewer
+                    key={svgKey}
+                    gamme={config.gamme}
+                    modele={config.modele}
+                    couleurCoffre={config.couleurCoffre}
+                    couleurCadre={config.couleurCadre}
+                    couleurPortillon={config.couleurPortillon}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Récap couleurs + dimensions — mobile uniquement */}
