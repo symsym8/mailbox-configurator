@@ -104,7 +104,7 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
   // Positionne la caméra devant le modèle (Z positif = face avant)
   useEffect(() => {
     const fovRad = (camera.fov * Math.PI) / 180;
-    const dist = (radius / Math.tan(fovRad / 2)) * 2.0;
+    const dist = (radius / Math.tan(fovRad / 2)) * 2.4;
 
     // Position : légèrement en hauteur, vue 3/4 face
     camera.position.set(dist * 0.35, dist * 0.25, dist);

@@ -1,6 +1,7 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, lazy, Suspense, memo } from "react";
 import MailboxSVGViewer from "./components/MailboxSVGViewer";
-import MailboxViewer3D from "./components/MailboxViewer3D";
+
+const MailboxViewer3D = lazy(() => import("./components/MailboxViewer3D"));
 import { RAL_COLORS } from "./utils/colors";
 import { generatePDF } from "./utils/pdfGenerator";
 
@@ -65,16 +66,17 @@ const RESPONSIVE_CSS = `
     .aside-section { background:#FFFFFF; border-bottom:1px solid #E2E2EC; }
 
     /* ── Ordre mobile souhaité ──────────────────────────────
-       1 GAMME  2 MODÈLE  3 SVG  4 COULEURS  5 DESCRIPTIF  6 CLIENT */
+       1 GAMME  2 DESCRIPTIF  3 MODÈLE  4 APERÇU  5 COULEURS  6 RÉCAP  7 CLIENT */
     .aside-gamme    { order:1; }
-    .aside-modele   { order:2; }
-    .app-preview    { order:3; flex:none; overflow:visible; }
-    .aside-couleurs { order:4; }
-    .aside-desc     { order:5; }
-    .aside-client   { order:6; }
+    .aside-desc     { order:2; }
+    .aside-modele   { order:3; }
+    .app-preview    { order:4; flex:none; overflow:visible; }
+    .aside-couleurs { order:5; }
+    .aside-recap    { order:6; }
+    .aside-client   { order:7; }
 
     .app-svg-zone {
-      flex:none; min-height:270px; height:45vw; max-height:380px;
+      flex:none; min-height:420px; height:60vw; max-height:520px;
       padding:20px 16px;
     }
     .app-bottom-bar   { display:none; }
@@ -139,6 +141,11 @@ const DEFAULTS = {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// Configs pour lesquelles un fichier GLB existe
+const CONFIGS_3D = new Set(["ELITE_B4"]);
+const has3D = (g, m) => CONFIGS_3D.has(`${g}_${m}`);
+
 const findRAL = (hex) =>
   RAL_COLORS.find((c) => c.hex.toLowerCase() === hex.toLowerCase());
 const ralLabel = (hex) => {
@@ -167,34 +174,49 @@ export default function App() {
   const [descOpen, setDescOpen] = useState(false);
   const [view3D, setView3D] = useState(false);
   const previewRef = useRef(null);
+  const svgForPdfRef = useRef(null);
 
   const setC = useCallback((k, v) => setConfig((p) => ({ ...p, [k]: v })), []);
 
-  const handleGamme = (gamme) => {
-    const models = GAMMES[gamme].models;
-    const modele = models.includes(config.modele) ? config.modele : models[0];
-    setSvgVisible(false);
-    setTimeout(() => {
-      setConfig((p) => ({ ...p, gamme, modele }));
-      setSvgKey((k) => k + 1);
-      setSvgVisible(true);
-    }, 180);
-  };
+  const handleGamme = useCallback(
+    (gamme) => {
+      const models = GAMMES[gamme].models;
+      const modele = models.includes(config.modele) ? config.modele : models[0];
+      if (!has3D(gamme, modele)) setView3D(false);
+      setSvgVisible(false);
+      setTimeout(() => {
+        setConfig((p) => ({ ...p, gamme, modele }));
+        setSvgKey((k) => k + 1);
+        setSvgVisible(true);
+      }, 180);
+    },
+    [config.modele],
+  );
 
-  const handleModele = (modele) => {
-    setSvgVisible(false);
-    setTimeout(() => {
-      setC("modele", modele);
-      setSvgKey((k) => k + 1);
-      setSvgVisible(true);
-    }, 180);
-  };
+  const handleModele = useCallback(
+    (modele) => {
+      if (!has3D(config.gamme, modele)) setView3D(false);
+      setSvgVisible(false);
+      setTimeout(() => {
+        setC("modele", modele);
+        setSvgKey((k) => k + 1);
+        setSvgVisible(true);
+      }, 180);
+    },
+    [setC, config.gamme],
+  );
+
+  // Setters stables : permettent à React.memo(ColorSwatch) de ne re-rendre
+  // que le swatch dont selected change, pas les 21 à chaque pick
+  const setCoffre = useCallback((v) => setC("couleurCoffre", v), [setC]);
+  const setCadre = useCallback((v) => setC("couleurCadre", v), [setC]);
+  const setPortillon = useCallback((v) => setC("couleurPortillon", v), [setC]);
 
   const handleExport = async () => {
     if (exporting) return;
     setExporting(true);
     try {
-      await generatePDF(previewRef.current, config, client);
+      await generatePDF(svgForPdfRef.current, config, client);
     } finally {
       setExporting(false);
     }
@@ -208,22 +230,18 @@ export default function App() {
       id: "coffre",
       label: "Coffre",
       color: config.couleurCoffre,
-      set: (v) => setC("couleurCoffre", v),
+      set: setCoffre,
     },
-    {
-      id: "cadre",
-      label: "Cadre",
-      color: config.couleurCadre,
-      set: (v) => setC("couleurCadre", v),
-    },
+    { id: "cadre", label: "Cadre", color: config.couleurCadre, set: setCadre },
     {
       id: "portillon",
       label: "Portillon",
       color: config.couleurPortillon,
-      set: (v) => setC("couleurPortillon", v),
+      set: setPortillon,
     },
   ];
   const az = zones.find((z) => z.id === activeZone);
+  const view3DAvailable = has3D(config.gamme, config.modele);
 
   return (
     <>
@@ -463,14 +481,110 @@ export default function App() {
                       selected={
                         az.color.toLowerCase() === ral.hex.toLowerCase()
                       }
-                      onClick={() => az.set(ral.hex)}
+                      onSelect={az.set}
                     />
                   ))}
                 </div>
               </div>
             </div>
 
-            {/* 05 — CLIENT ────────────────────────────────────────────── */}
+            {/* 05 — RÉCAP couleurs + dimensions (mobile uniquement) ───── */}
+            <div className="aside-section aside-recap recap-mobile">
+              <div style={{ padding: "12px 16px" }}>
+                <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
+                  {zones.map((z) => (
+                    <div
+                      key={z.id}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 7,
+                        flex: 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: 14,
+                          height: 14,
+                          borderRadius: 3,
+                          background: z.color,
+                          flexShrink: 0,
+                          border: "1px solid rgba(0,0,0,0.12)",
+                        }}
+                      />
+                      <div>
+                        <div
+                          style={{
+                            fontSize: 8.5,
+                            letterSpacing: "0.09em",
+                            color: T.dim,
+                            textTransform: "uppercase",
+                            marginBottom: 1,
+                          }}
+                        >
+                          {z.label}
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 10.5,
+                            color: T.muted,
+                            fontWeight: 500,
+                          }}
+                        >
+                          {ralCode(z.color)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    background: T.s2,
+                    borderRadius: 8,
+                    padding: "10px 12px",
+                  }}
+                >
+                  {[
+                    ["Hauteur", dim.h],
+                    ["Largeur", dim.l],
+                    ["Profondeur", dim.p],
+                  ].map(([lbl, val]) => (
+                    <div key={lbl} style={{ flex: 1, textAlign: "center" }}>
+                      <div
+                        style={{
+                          fontSize: 8.5,
+                          letterSpacing: "0.1em",
+                          color: T.dim,
+                          textTransform: "uppercase",
+                          marginBottom: 3,
+                        }}
+                      >
+                        {lbl}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 15,
+                          color: T.text,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {val}
+                        <span
+                          style={{ fontSize: 9, color: T.dim, marginLeft: 2 }}
+                        >
+                          mm
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 06 — CLIENT ────────────────────────────────────────────── */}
             <div className="aside-section aside-client">
               <SectionLabel number="05" label="Client" />
               <div
@@ -580,7 +694,14 @@ export default function App() {
 
               {/* Bouton toggle Vue 2D / Vue 3D — coin haut gauche */}
               <button
-                onClick={() => setView3D((v) => !v)}
+                onClick={
+                  view3DAvailable ? () => setView3D((v) => !v) : undefined
+                }
+                title={
+                  view3DAvailable
+                    ? undefined
+                    : "Vue 3D disponible uniquement pour ELITE B4"
+                }
                 style={{
                   position: "absolute",
                   top: 14,
@@ -593,8 +714,9 @@ export default function App() {
                   fontSize: 11,
                   fontWeight: 700,
                   letterSpacing: "0.06em",
-                  color: view3D ? "#fff" : T.muted,
-                  cursor: "pointer",
+                  color: view3D ? "#fff" : view3DAvailable ? T.muted : T.dim,
+                  cursor: view3DAvailable ? "pointer" : "not-allowed",
+                  opacity: view3DAvailable ? 1 : 0.45,
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
@@ -616,11 +738,40 @@ export default function App() {
                     zIndex: 1,
                   }}
                 >
-                  <MailboxViewer3D
-                    couleurCoffre={config.couleurCoffre}
-                    couleurCadre={config.couleurCadre}
-                    couleurPortillon={config.couleurPortillon}
-                  />
+                  <Suspense
+                    fallback={
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 10,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 18,
+                            height: 18,
+                            borderRadius: "50%",
+                            border: "2px solid #E2E2EC",
+                            borderTopColor: "#C9A84C",
+                            animation: "spin 0.8s linear infinite",
+                          }}
+                        />
+                        <span style={{ fontSize: 13, color: "#5A5A78" }}>
+                          Chargement 3D…
+                        </span>
+                      </div>
+                    }
+                  >
+                    <MailboxViewer3D
+                      couleurCoffre={config.couleurCoffre}
+                      couleurCadre={config.couleurCadre}
+                      couleurPortillon={config.couleurPortillon}
+                    />
+                  </Suspense>
                 </div>
               ) : (
                 <div
@@ -646,108 +797,6 @@ export default function App() {
                   />
                 </div>
               )}
-            </div>
-
-            {/* Récap couleurs + dimensions — mobile uniquement */}
-            <div
-              className="recap-mobile"
-              style={{
-                background: T.surface,
-                borderTop: `1px solid ${T.border}`,
-              }}
-            >
-              <div style={{ padding: "12px 16px" }}>
-                <div style={{ display: "flex", gap: 12, marginBottom: 12 }}>
-                  {zones.map((z) => (
-                    <div
-                      key={z.id}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 7,
-                        flex: 1,
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: 14,
-                          height: 14,
-                          borderRadius: 3,
-                          background: z.color,
-                          flexShrink: 0,
-                          border: "1px solid rgba(0,0,0,0.12)",
-                        }}
-                      />
-                      <div>
-                        <div
-                          style={{
-                            fontSize: 8.5,
-                            letterSpacing: "0.09em",
-                            color: T.dim,
-                            textTransform: "uppercase",
-                            marginBottom: 1,
-                          }}
-                        >
-                          {z.label}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 10.5,
-                            color: T.muted,
-                            fontWeight: 500,
-                          }}
-                        >
-                          {ralCode(z.color)}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    background: T.s2,
-                    borderRadius: 8,
-                    padding: "10px 12px",
-                  }}
-                >
-                  {[
-                    ["Hauteur", dim.h],
-                    ["Largeur", dim.l],
-                    ["Profondeur", dim.p],
-                  ].map(([lbl, val]) => (
-                    <div key={lbl} style={{ flex: 1, textAlign: "center" }}>
-                      <div
-                        style={{
-                          fontSize: 8.5,
-                          letterSpacing: "0.1em",
-                          color: T.dim,
-                          textTransform: "uppercase",
-                          marginBottom: 3,
-                        }}
-                      >
-                        {lbl}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 15,
-                          color: T.text,
-                          fontWeight: 700,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {val}
-                        <span
-                          style={{ fontSize: 9, color: T.dim, marginLeft: 2 }}
-                        >
-                          mm
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
 
             {/* Barre du bas — PC uniquement */}
@@ -856,6 +905,29 @@ export default function App() {
           </main>
         </div>
         {/* fin app-main */}
+
+        {/* SVG hors-écran — toujours rendu pour la capture PDF (jamais le Canvas 3D) */}
+        <div
+          ref={svgForPdfRef}
+          style={{
+            position: "fixed",
+            left: -9999,
+            top: 0,
+            width: 600,
+            height: 450,
+            pointerEvents: "none",
+            background: "#F5F5F7",
+          }}
+        >
+          <MailboxSVGViewer
+            key={`pdf-${svgKey}`}
+            gamme={config.gamme}
+            modele={config.modele}
+            couleurCoffre={config.couleurCoffre}
+            couleurCadre={config.couleurCadre}
+            couleurPortillon={config.couleurPortillon}
+          />
+        </div>
 
         {/* Bouton export fixe — mobile uniquement */}
         <div
@@ -1008,7 +1080,7 @@ function Accordion({ number, label, badge, open, onToggle, children }) {
   );
 }
 
-function GammeCard({ gKey, g, active, onClick }) {
+const GammeCard = memo(function GammeCard({ gKey, g, active, onClick }) {
   return (
     <div
       onClick={onClick}
@@ -1070,9 +1142,9 @@ function GammeCard({ gKey, g, active, onClick }) {
       </div>
     </div>
   );
-}
+});
 
-function ModelCard({ model, dim, active, onClick }) {
+const ModelCard = memo(function ModelCard({ model, dim, active, onClick }) {
   return (
     <div
       onClick={onClick}
@@ -1102,7 +1174,7 @@ function ModelCard({ model, dim, active, onClick }) {
       </div>
     </div>
   );
-}
+});
 
 function ZoneTab({ zone, active, onClick }) {
   return (
@@ -1143,10 +1215,10 @@ function ZoneTab({ zone, active, onClick }) {
   );
 }
 
-function ColorSwatch({ ral, selected, onClick }) {
+const ColorSwatch = memo(function ColorSwatch({ ral, selected, onSelect }) {
   return (
     <div
-      onClick={onClick}
+      onClick={() => onSelect(ral.hex)}
       title={`${ral.code} · ${ral.name}`}
       style={{
         width: "100%",
@@ -1166,9 +1238,15 @@ function ColorSwatch({ ral, selected, onClick }) {
       }}
     />
   );
-}
+});
 
-function Field({ label, value, onChange, type = "text", multiline = false }) {
+const Field = memo(function Field({
+  label,
+  value,
+  onChange,
+  type = "text",
+  multiline = false,
+}) {
   const base = {
     width: "100%",
     boxSizing: "border-box",
@@ -1218,7 +1296,7 @@ function Field({ label, value, onChange, type = "text", multiline = false }) {
       )}
     </div>
   );
-}
+});
 
 function ExportBtn({ exporting, onClick }) {
   const [hov, setHov] = useState(false);
