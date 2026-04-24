@@ -1,9 +1,89 @@
-import { useState, useRef, useCallback, lazy, Suspense, memo } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+  useEffect,
+  lazy,
+  Suspense,
+  memo,
+  Component,
+} from "react";
 import MailboxSVGViewer from "./components/MailboxSVGViewer";
 
 const MailboxViewer3D = lazy(() => import("./components/MailboxViewer3D"));
 import { RAL_COLORS } from "./utils/colors";
 import { generatePDF } from "./utils/pdfGenerator";
+
+// ─── ErrorBoundary pour le viewer 3D ─────────────────────────────────────────
+class Viewer3DErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error) {
+    console.error("[Viewer3D] Erreur lors du rendu 3D :", error);
+  }
+  componentDidUpdate(prevProps) {
+    // Réinitialise l'erreur quand gamme ou modele change
+    if (
+      prevProps.gamme !== this.props.gamme ||
+      prevProps.modele !== this.props.modele
+    ) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            background: "#F5F5F7",
+            zIndex: 1,
+          }}
+        >
+          <div style={{ fontSize: 13, color: "#5A5A78", textAlign: "center" }}>
+            Impossible de charger le modèle 3D.
+            <br />
+            <span style={{ fontSize: 11, color: "#9898B0" }}>
+              {this.state.error?.message || "Erreur inconnue"}
+            </span>
+          </div>
+          <button
+            onClick={() => {
+              this.setState({ error: null });
+              this.props.onReset?.();
+            }}
+            style={{
+              padding: "7px 18px",
+              borderRadius: 20,
+              border: "1px solid #E2E2EC",
+              background: "#fff",
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#5A5A78",
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Retour Vue 2D
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
@@ -142,10 +222,6 @@ const DEFAULTS = {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// Configs pour lesquelles un fichier GLB existe
-const CONFIGS_3D = new Set(["ELITE_B4"]);
-const has3D = (g, m) => CONFIGS_3D.has(`${g}_${m}`);
-
 const findRAL = (hex) =>
   RAL_COLORS.find((c) => c.hex.toLowerCase() === hex.toLowerCase());
 const ralLabel = (hex) => {
@@ -182,7 +258,6 @@ export default function App() {
     (gamme) => {
       const models = GAMMES[gamme].models;
       const modele = models.includes(config.modele) ? config.modele : models[0];
-      if (!has3D(gamme, modele)) setView3D(false);
       setSvgVisible(false);
       setTimeout(() => {
         setConfig((p) => ({ ...p, gamme, modele }));
@@ -195,7 +270,6 @@ export default function App() {
 
   const handleModele = useCallback(
     (modele) => {
-      if (!has3D(config.gamme, modele)) setView3D(false);
       setSvgVisible(false);
       setTimeout(() => {
         setC("modele", modele);
@@ -212,7 +286,7 @@ export default function App() {
   const setCadre = useCallback((v) => setC("couleurCadre", v), [setC]);
   const setPortillon = useCallback((v) => setC("couleurPortillon", v), [setC]);
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     if (exporting) return;
     setExporting(true);
     try {
@@ -220,28 +294,62 @@ export default function App() {
     } finally {
       setExporting(false);
     }
-  };
+  }, [exporting, config, client]);
+
+  // Précharge les SVG des modèles adjacents pour une navigation instantanée
+  useEffect(() => {
+    const models = GAMMES[config.gamme].models;
+    const idx = models.indexOf(config.modele);
+    const adjacent = [idx - 1, idx + 1]
+      .filter((i) => i >= 0 && i < models.length)
+      .map((i) => `/image/${config.gamme.toLowerCase()}_${models[i]}.svg`);
+
+    const links = adjacent.map((href) => {
+      const el = document.createElement("link");
+      el.rel = "prefetch";
+      el.as = "fetch";
+      el.href = href;
+      document.head.appendChild(el);
+      return el;
+    });
+    return () => links.forEach((el) => el.remove());
+  }, [config.gamme, config.modele]);
 
   const dim = DIMS[config.modele];
   const gamme = GAMMES[config.gamme];
 
-  const zones = [
-    {
-      id: "coffre",
-      label: "Coffre",
-      color: config.couleurCoffre,
-      set: setCoffre,
-    },
-    { id: "cadre", label: "Cadre", color: config.couleurCadre, set: setCadre },
-    {
-      id: "portillon",
-      label: "Portillon",
-      color: config.couleurPortillon,
-      set: setPortillon,
-    },
-  ];
+  // Memoïsé : références stables → ZoneTab (memo) ne re-rend que si sa couleur change
+  const zones = useMemo(
+    () => [
+      {
+        id: "coffre",
+        label: "Coffre",
+        color: config.couleurCoffre,
+        set: setCoffre,
+      },
+      {
+        id: "cadre",
+        label: "Cadre",
+        color: config.couleurCadre,
+        set: setCadre,
+      },
+      {
+        id: "portillon",
+        label: "Portillon",
+        color: config.couleurPortillon,
+        set: setPortillon,
+      },
+    ],
+    [
+      config.couleurCoffre,
+      config.couleurCadre,
+      config.couleurPortillon,
+      setCoffre,
+      setCadre,
+      setPortillon,
+    ],
+  );
   const az = zones.find((z) => z.id === activeZone);
-  const view3DAvailable = has3D(config.gamme, config.modele);
 
   return (
     <>
@@ -447,7 +555,7 @@ export default function App() {
                       key={z.id}
                       zone={z}
                       active={activeZone === z.id}
-                      onClick={() => setActiveZone(z.id)}
+                      onActivate={setActiveZone}
                     />
                   ))}
                 </div>
@@ -694,14 +802,7 @@ export default function App() {
 
               {/* Bouton toggle Vue 2D / Vue 3D — coin haut gauche */}
               <button
-                onClick={
-                  view3DAvailable ? () => setView3D((v) => !v) : undefined
-                }
-                title={
-                  view3DAvailable
-                    ? undefined
-                    : "Vue 3D disponible uniquement pour ELITE B4"
-                }
+                onClick={() => setView3D((v) => !v)}
                 style={{
                   position: "absolute",
                   top: 14,
@@ -714,9 +815,8 @@ export default function App() {
                   fontSize: 11,
                   fontWeight: 700,
                   letterSpacing: "0.06em",
-                  color: view3D ? "#fff" : view3DAvailable ? T.muted : T.dim,
-                  cursor: view3DAvailable ? "pointer" : "not-allowed",
-                  opacity: view3DAvailable ? 1 : 0.45,
+                  color: view3D ? "#fff" : T.muted,
+                  cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   gap: 6,
@@ -738,40 +838,48 @@ export default function App() {
                     zIndex: 1,
                   }}
                 >
-                  <Suspense
-                    fallback={
-                      <div
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          gap: 10,
-                        }}
-                      >
+                  <Viewer3DErrorBoundary
+                    gamme={config.gamme}
+                    modele={config.modele}
+                    onReset={() => setView3D(false)}
+                  >
+                    <Suspense
+                      fallback={
                         <div
                           style={{
-                            width: 18,
-                            height: 18,
-                            borderRadius: "50%",
-                            border: "2px solid #E2E2EC",
-                            borderTopColor: "#C9A84C",
-                            animation: "spin 0.8s linear infinite",
+                            width: "100%",
+                            height: "100%",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 10,
                           }}
-                        />
-                        <span style={{ fontSize: 13, color: "#5A5A78" }}>
-                          Chargement 3D…
-                        </span>
-                      </div>
-                    }
-                  >
-                    <MailboxViewer3D
-                      couleurCoffre={config.couleurCoffre}
-                      couleurCadre={config.couleurCadre}
-                      couleurPortillon={config.couleurPortillon}
-                    />
-                  </Suspense>
+                        >
+                          <div
+                            style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: "50%",
+                              border: "2px solid #E2E2EC",
+                              borderTopColor: "#C9A84C",
+                              animation: "spin 0.8s linear infinite",
+                            }}
+                          />
+                          <span style={{ fontSize: 13, color: "#5A5A78" }}>
+                            Chargement 3D…
+                          </span>
+                        </div>
+                      }
+                    >
+                      <MailboxViewer3D
+                        gamme={config.gamme}
+                        modele={config.modele}
+                        couleurCoffre={config.couleurCoffre}
+                        couleurCadre={config.couleurCadre}
+                        couleurPortillon={config.couleurPortillon}
+                      />
+                    </Suspense>
+                  </Viewer3DErrorBoundary>
                 </div>
               ) : (
                 <div
@@ -916,7 +1024,7 @@ export default function App() {
             width: 600,
             height: 450,
             pointerEvents: "none",
-            background: "#F5F5F7",
+            background: "#FFFFFF",
           }}
         >
           <MailboxSVGViewer
@@ -1176,10 +1284,14 @@ const ModelCard = memo(function ModelCard({ model, dim, active, onClick }) {
   );
 });
 
-function ZoneTab({ zone, active, onClick }) {
+const ZoneTab = memo(function ZoneTab({ zone, active, onActivate }) {
+  const handleClick = useCallback(
+    () => onActivate(zone.id),
+    [onActivate, zone.id],
+  );
   return (
     <button
-      onClick={onClick}
+      onClick={handleClick}
       className="zone-tab"
       style={{
         flex: 1,
@@ -1213,7 +1325,7 @@ function ZoneTab({ zone, active, onClick }) {
       {zone.label}
     </button>
   );
-}
+});
 
 const ColorSwatch = memo(function ColorSwatch({ ral, selected, onSelect }) {
   return (

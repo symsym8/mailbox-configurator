@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, memo } from "react";
 
 // Couleurs marqueurs AutoCAD dans les SVG
 const MARKERS = {
@@ -61,7 +61,8 @@ function applyColors(container, coffre, cadre, portillon) {
   }
 }
 
-export default function MailboxSVGViewer({
+// memo : évite les re-rendus quand des états non-liés (view3D, exporting…) changent dans App
+export default memo(function MailboxSVGViewer({
   gamme,
   modele,
   couleurCoffre,
@@ -186,4 +187,4 @@ export default function MailboxSVGViewer({
       )}
     </div>
   );
-}
+});

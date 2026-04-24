@@ -74,26 +74,66 @@ async function loadLogoDataUrl() {
   });
 }
 
-// En-tête bleu commun aux deux pages
+// En-tête commun aux deux pages
 function drawHeader(pdf, logoInfo, subtitle, pageWidth, margin) {
-  pdf.setFillColor(29, 78, 216);
-  pdf.rect(0, 0, pageWidth, 38, "F");
+  const GOLD = [201, 168, 76]; // #C9A84C
+  const DARK = [29, 78, 216]; // #1D4ED8 — même bleu que le badge ELITE
+  const WHITE = [255, 255, 255];
+  const headerH = 38;
 
+  // Fond bleu marine élégant
+  pdf.setFillColor(...DARK);
+  pdf.rect(0, 0, pageWidth, headerH, "F");
+
+  // Logo avec fond blanc arrondi pour le faire ressortir
   if (logoInfo) {
     const logoH = 22;
     const logoW = (logoInfo.w / logoInfo.h) * logoH;
-    pdf.addImage(logoInfo.dataUrl, "PNG", margin, 8, logoW, logoH);
+    const logoX = margin;
+    const logoY = (headerH - logoH) / 2;
+    const pad = 3;
+    pdf.setFillColor(...WHITE);
+    pdf.roundedRect(
+      logoX - pad,
+      logoY - pad,
+      logoW + pad * 2,
+      logoH + pad * 2,
+      3,
+      3,
+      "F",
+    );
+    pdf.addImage(logoInfo.dataUrl, "PNG", logoX, logoY, logoW, logoH);
   }
 
-  pdf.setTextColor(255, 255, 255);
-  pdf.setFontSize(15);
+  // Titre : "Configurateur BAL — " en blanc fin + "CTS" en doré gras
+  pdf.setFontSize(14);
+  const part1 = "Configurateur BAL — ";
+  const part2 = "CTS";
+  pdf.setFont("helvetica", "normal");
+  const w1 = pdf.getTextWidth(part1);
   pdf.setFont("helvetica", "bold");
-  pdf.text("Configurateur BAL — CTS", pageWidth - margin, 17, {
-    align: "right",
-  });
+  const w2 = pdf.getTextWidth(part2);
+  const titleY = 15.5;
+  const startX = pageWidth - margin - w1 - w2;
+
+  pdf.setTextColor(...WHITE);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(part1, startX, titleY);
+
+  pdf.setTextColor(...GOLD);
+  pdf.setFont("helvetica", "bold");
+  pdf.text(part2, startX + w1, titleY);
+
+  // Sous-titre (gamme/modèle) en doré
   pdf.setFontSize(9);
   pdf.setFont("helvetica", "normal");
-  pdf.text(subtitle, pageWidth - margin, 28, { align: "right" });
+  pdf.setTextColor(...GOLD);
+  pdf.text(subtitle, pageWidth - margin, 27, { align: "right" });
+
+  // Ligne dorée séparatrice en bas de l'en-tête
+  pdf.setDrawColor(...GOLD);
+  pdf.setLineWidth(0.7);
+  pdf.line(0, headerH, pageWidth, headerH);
 }
 
 // Pied de page
@@ -282,7 +322,7 @@ export async function generatePDF(previewElement, config, clientInfo) {
     const imgW = Math.min(imgH * ratio, contentWidth - 4);
     const imgX = margin + (contentWidth - imgW) / 2;
 
-    pdf.setFillColor(248, 250, 252);
+    pdf.setFillColor(255, 255, 255);
     pdf.setDrawColor(226, 232, 240);
     pdf.setLineWidth(0.3);
     pdf.roundedRect(margin, y - 2, contentWidth, imgH + 10, 3, 3, "FD");

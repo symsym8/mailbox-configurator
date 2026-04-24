@@ -5,7 +5,6 @@ import * as THREE from "three";
 
 THREE.ColorManagement.enabled = true;
 
-// Couleurs marqueurs confirmées dans la console GLB
 const MARKER_RED = new THREE.Color(1, 0, 0);
 const MARKER_CYAN = new THREE.Color(0, 1, 1);
 const MARKER_GREEN = new THREE.Color(0, 1, 0);
@@ -25,23 +24,31 @@ function colorClose(a, b) {
   );
 }
 
+function isInoxColor(c) {
+  return (
+    colorClose(c, MARKER_YELLOW) ||
+    colorClose(c, MARKER_GRAY) ||
+    (c.r > 0.8 && c.g > 0.8 && c.b > 0.8)
+  );
+}
+
 function getTargetColor(orig, coffre, cadre, portillon) {
   if (colorClose(orig, MARKER_RED)) return coffre;
   if (colorClose(orig, MARKER_CYAN)) return cadre;
   if (colorClose(orig, MARKER_GREEN)) return portillon;
-  if (colorClose(orig, MARKER_YELLOW)) return INOX_HEX;
+  if (isInoxColor(orig)) return INOX_HEX;
   return null;
 }
 
-// Couleurs trop sombres : ne pas assombrir davantage
 const NO_DARKEN = new Set([
-  "#1a2b6d", // RAL 5002
-  "#1f3a2d", // RAL 6005
-  "#383e42", // RAL 7016
-  "#474a50", // RAL 7024
-  "#1f1f1f", // RAL 9011
-  "#442f29", // RAL 8017
-  "#6c3b2a", // RAL 8012
+  "#1a2b6d",
+  "#1f3a2d",
+  "#383e42",
+  "#474a50",
+  "#1f1f1f",
+  "#442f29",
+  "#6c3b2a",
+  "#c0c0c0", // inox fixe — ne jamais assombrir
 ]);
 
 function applyDarken(hex) {
@@ -60,31 +67,58 @@ function makeMaterial(color, isMetal) {
   });
 }
 
-function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
-  const gltf = useGLTF("/elite_B4.glb");
+// Renvoie le premier matériau (obj.material peut être un tableau dans Three.js)
+function firstMat(obj) {
+  return Array.isArray(obj.material) ? obj.material[0] : obj.material;
+}
+
+function MailboxModel({
+  gamme,
+  modele,
+  couleurCoffre,
+  couleurCadre,
+  couleurPortillon,
+}) {
+  const glbPath = `/${gamme.toLowerCase()}_${modele}.glb`;
+  const gltf = useGLTF(glbPath);
   const { camera } = useThree();
 
   const { cloned, originals, radius } = useMemo(() => {
     const cloned = gltf.scene.clone(true);
     const originals = new Map();
 
+    console.group(`[GLB] ${gamme}_${modele} — meshes`);
     cloned.traverse((obj) => {
       if (!obj.isMesh) return;
 
-      const origColor = obj.material.color.clone();
-      // Serrures (gris) et ailettes (jaune → inox) : matériau métal brossé
-      const isMetal =
-        colorClose(origColor, MARKER_GRAY) ||
-        colorClose(origColor, MARKER_YELLOW);
+      const mat = firstMat(obj);
+      if (!mat?.color) {
+        console.log(`  ${obj.name} — pas de couleur`);
+        return;
+      }
 
-      obj.material = makeMaterial(origColor, isMetal);
+      const origColor = mat.color.clone();
+      console.log(
+        `  ${obj.name} — r=${origColor.r.toFixed(3)} g=${origColor.g.toFixed(3)} b=${origColor.b.toFixed(3)}`,
+      );
+
+      if (isInoxColor(origColor)) {
+        obj.material = new THREE.MeshStandardMaterial({
+          color: new THREE.Color(INOX_HEX),
+          roughness: 0.3,
+          metalness: 0.6,
+          envMapIntensity: 0.9,
+        });
+      } else {
+        obj.material = makeMaterial(origColor, false);
+      }
       obj.castShadow = true;
       obj.receiveShadow = true;
 
       originals.set(obj.uuid, origColor);
     });
+    console.groupEnd();
 
-    // Scale mm → unités Three.js avant le calcul de la bounding box
     cloned.scale.setScalar(MODEL_SCALE);
     cloned.updateWorldMatrix(true, true);
 
@@ -93,7 +127,6 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
     box.getCenter(center);
     cloned.position.sub(center);
 
-    // Sphère englobante après centrage → distance caméra
     const box2 = new THREE.Box3().setFromObject(cloned);
     const sphere = new THREE.Sphere();
     box2.getBoundingSphere(sphere);
@@ -101,12 +134,9 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
     return { cloned, originals, radius: sphere.radius };
   }, [gltf.scene]);
 
-  // Positionne la caméra devant le modèle (Z positif = face avant)
   useEffect(() => {
     const fovRad = (camera.fov * Math.PI) / 180;
-    const dist = (radius / Math.tan(fovRad / 2)) * 2.4;
-
-    // Position : légèrement en hauteur, vue 3/4 face
+    const dist = (radius / Math.tan(fovRad / 2)) * 1.4;
     camera.position.set(dist * 0.35, dist * 0.25, dist);
     camera.near = radius * 0.01;
     camera.far = dist * 15;
@@ -114,7 +144,6 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
     camera.updateProjectionMatrix();
   }, [camera, radius]);
 
-  // Réapplique les couleurs RAL à chaque changement
   useEffect(() => {
     cloned.traverse((obj) => {
       if (!obj.isMesh || !originals.has(obj.uuid)) return;
@@ -134,7 +163,6 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
     });
   }, [cloned, originals, couleurCoffre, couleurCadre, couleurPortillon]);
 
-  // rotation Y 180° pour orienter la face avant vers la caméra
   return (
     <group rotation={[0, Math.PI, 0]}>
       <primitive object={cloned} />
@@ -143,6 +171,8 @@ function MailboxModel({ couleurCoffre, couleurCadre, couleurPortillon }) {
 }
 
 export default function MailboxViewer3D({
+  gamme,
+  modele,
   couleurCoffre,
   couleurCadre,
   couleurPortillon,
@@ -158,7 +188,7 @@ export default function MailboxViewer3D({
     >
       <Canvas
         shadows
-        camera={{ position: [0, 2, 8], fov: 50 }}
+        camera={{ position: [0, 2, 8], fov: 35 }}
         style={{ width: "100%", height: "100%" }}
         gl={{
           antialias: true,
@@ -189,6 +219,8 @@ export default function MailboxViewer3D({
 
         <Suspense fallback={null}>
           <MailboxModel
+            gamme={gamme}
+            modele={modele}
             couleurCoffre={couleurCoffre}
             couleurCadre={couleurCadre}
             couleurPortillon={couleurPortillon}
@@ -206,4 +238,14 @@ export default function MailboxViewer3D({
   );
 }
 
-useGLTF.preload("/elite_B4.glb");
+[
+  "/elite_A1.glb",
+  "/elite_A2.glb",
+  "/elite_A3.glb",
+  "/elite_B2.glb",
+  "/elite_B4.glb",
+  "/elite_B6.glb",
+  "/discretion_A1.glb",
+  "/discretion_A2.glb",
+  "/discretion_A3.glb",
+].forEach((f) => useGLTF.preload(f));
